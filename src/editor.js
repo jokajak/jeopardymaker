@@ -1,4 +1,5 @@
 import { getRound, saveBoard, makeCategory, exportBoard as serializeBoard } from './store.js';
+import { fileToDataUrl, wireDropzone, imageFromPaste } from './image.js';
 
 let _board = null;
 let _container = null;
@@ -67,7 +68,6 @@ function _buildToolbar() {
   titleInput.placeholder = 'Board name';
   titleInput.addEventListener('input', () => { _board.name = titleInput.value || 'Untitled'; _autoSave(); });
 
-  // Category count control
   const catCtrl = document.createElement('div');
   catCtrl.className = 'cat-ctrl';
 
@@ -126,7 +126,6 @@ function _buildGrid() {
   grid.className = 'editor-grid';
   grid.style.gridTemplateColumns = `repeat(${categories.length}, 1fr)`;
 
-  // Header row: editable category titles
   categories.forEach((cat, col) => {
     const cell = document.createElement('div');
     cell.className = 'editor-cell editor-header-cell';
@@ -140,7 +139,6 @@ function _buildGrid() {
     grid.appendChild(cell);
   });
 
-  // Value rows
   values.forEach((val, row) => {
     categories.forEach((cat, col) => {
       const cellData = cat.cells[row];
@@ -184,7 +182,6 @@ function _renderCellPreview(el, val, cellData) {
     el.appendChild(preview);
   }
 
-  // Presence dots: blue = has prompt, green = has answer
   const hasPp = !!(p.text || p.imageDataUrl);
   const hasAp = !!(cellData.answer.text || cellData.answer.imageDataUrl);
   if (hasPp || hasAp) {
@@ -238,11 +235,26 @@ function _openCellModal(col, row, val) {
   overlay.appendChild(content);
   document.body.appendChild(overlay);
 
+  // Document-level paste: when not in a textarea/input, treat as image paste
+  // and route to whichever tab is active.
+  const pasteHandler = async e => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    const file = imageFromPaste(e);
+    if (file) {
+      e.preventDefault();
+      const activeTab = promptBtn.classList.contains('active') ? 'prompt' : 'answer';
+      const part = cell[activeTab];
+      const dataUrl = await fileToDataUrl(file, msg => showTabError(tabBody, msg));
+      if (dataUrl) { part.imageDataUrl = dataUrl; renderTab(activeTab); }
+    }
+  };
+  document.addEventListener('paste', pasteHandler);
+
   function renderTab(which) {
     promptBtn.classList.toggle('active', which === 'prompt');
     answerBtn.classList.toggle('active', which === 'answer');
     tabBody.innerHTML = '';
-    tabBody.appendChild(_buildTabPane(cell[which]));
+    tabBody.appendChild(_buildTabPane(cell[which], () => renderTab(which)));
   }
 
   promptBtn.addEventListener('click', () => renderTab('prompt'));
@@ -254,6 +266,7 @@ function _openCellModal(col, row, val) {
 
   function closeModal() {
     document.removeEventListener('keydown', escHandler);
+    document.removeEventListener('paste', pasteHandler);
     overlay.remove();
     _autoSave();
     const cellEl = _gridEl?.querySelector(`[data-row="${row}"][data-col="${col}"]`);
@@ -263,7 +276,12 @@ function _openCellModal(col, row, val) {
   renderTab('prompt');
 }
 
-function _buildTabPane(part) {
+function showTabError(tabBody, msg) {
+  const errEl = tabBody.querySelector('.dropzone-error');
+  if (errEl) { errEl.textContent = msg; setTimeout(() => { errEl.textContent = ''; }, 5000); }
+}
+
+function _buildTabPane(part, onRerender) {
   const pane = document.createElement('div');
   pane.className = 'tab-pane';
 
@@ -273,6 +291,66 @@ function _buildTabPane(part) {
   ta.value = part.text || '';
   ta.addEventListener('input', () => { part.text = ta.value; });
   pane.appendChild(ta);
+
+  // Dropzone
+  const dropzone = document.createElement('div');
+  dropzone.className = 'editor-dropzone' + (part.imageDataUrl ? ' has-image' : '');
+
+  const onError = msg => {
+    errEl.textContent = msg;
+    setTimeout(() => { errEl.textContent = ''; }, 5000);
+  };
+
+  const onFile = async file => {
+    const dataUrl = await fileToDataUrl(file, onError);
+    if (dataUrl) { part.imageDataUrl = dataUrl; onRerender(); }
+  };
+
+  if (part.imageDataUrl) {
+    const thumb = document.createElement('img');
+    thumb.className = 'dropzone-thumb';
+    thumb.src = part.imageDataUrl;
+    dropzone.appendChild(thumb);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn small danger';
+    removeBtn.textContent = '× Remove image';
+    removeBtn.addEventListener('click', e => { e.stopPropagation(); part.imageDataUrl = null; onRerender(); });
+    dropzone.appendChild(removeBtn);
+  } else {
+    const hint = document.createElement('div');
+    hint.className = 'dropzone-hint';
+    hint.innerHTML = '<span>Drop image here or paste</span>';
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) onFile(fileInput.files[0]); });
+
+    const pickBtn = document.createElement('button');
+    pickBtn.className = 'btn small';
+    pickBtn.textContent = 'Choose File';
+    pickBtn.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
+
+    hint.appendChild(pickBtn);
+    dropzone.appendChild(hint);
+    dropzone.appendChild(fileInput);
+  }
+
+  wireDropzone(dropzone, onFile);
+
+  // Paste directly on the dropzone element
+  dropzone.addEventListener('paste', async e => {
+    const file = imageFromPaste(e);
+    if (file) { e.preventDefault(); await onFile(file); }
+  });
+
+  pane.appendChild(dropzone);
+
+  const errEl = document.createElement('div');
+  errEl.className = 'dropzone-error';
+  pane.appendChild(errEl);
 
   return pane;
 }
