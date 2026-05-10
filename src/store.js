@@ -38,11 +38,11 @@ export function makeBoard(name = 'New Board', categoryCount = 3) {
   };
 }
 
-export function makeGameState(boardId) {
+export function makeGameState(boardId, playerCount = 2) {
   return {
     boardId,
-    p1Score: 0,
-    p2Score: 0,
+    playerCount,
+    scores: Array.from({ length: playerCount }, () => 0),
     revealedCells: [],
   };
 }
@@ -78,6 +78,15 @@ export async function saveGameState(state) {
 export async function loadGameState(boardId) {
   const stored = await get(GAMESTATE_PREFIX + boardId);
   if (!stored) return makeGameState(boardId);
+
+  // Migrate old two-player format (p1Score / p2Score) to scores array
+  if (!stored.scores) {
+    stored.scores = [stored.p1Score ?? 0, stored.p2Score ?? 0];
+    stored.playerCount = 2;
+    delete stored.p1Score;
+    delete stored.p2Score;
+  }
+
   return { ...stored, revealedCells: stored.revealedCells ?? [] };
 }
 

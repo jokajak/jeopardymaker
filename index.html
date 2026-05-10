@@ -244,17 +244,17 @@
     }
     .scorebar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      gap: 12px;
       padding: 6px 16px;
       background: rgba(0,0,0,0.4);
       border-radius: var(--radius);
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
-    .score { font-size: 1.4rem; font-weight: bold; min-width: 120px; }
-    .p1-score { color: var(--p1-color); }
-    .p2-score { color: var(--p2-color); text-align: right; }
-    .scorebar-controls { display: flex; gap: 8px; align-items: center; }
+    .scorebar-controls { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    .scorebar-scores { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; flex: 1; justify-content: flex-end; }
+    .player-score { font-size: 1.2rem; font-weight: bold; white-space: nowrap; }
     .ctrl-btn {
       background: none;
       border: 1px solid #555;
@@ -329,20 +329,35 @@
     .modal-image { max-width: 100%; max-height: 52vh; border-radius: 8px; object-fit: contain; }
     .modal-hint { font-size: 0.78rem; color: #aaa; font-weight: normal; margin-top: 4px; }
 
-    /* Buzz state border on modal */
-    .modal-overlay.buzz-p1 .modal-content { border-color: var(--p1-color); }
-    .modal-overlay.buzz-p2 .modal-content { border-color: var(--p2-color); }
+    /* Buzz state: dynamic border color via CSS variable */
+    .modal-overlay.buzz-active .modal-content { border-color: var(--buzz-color, var(--gold)); }
 
-    /* Buzz indicator badge */
-    .buzz-badge {
-      font-size: 1rem;
+    /* On-screen buzz controls */
+    .buzz-controls { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 4px; }
+    .buzz-btn-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .buzz-player-btn {
+      font-size: 1.1rem;
+      padding: 10px 22px;
+      border-width: 3px;
+    }
+    .buzz-player-btn:hover { opacity: 0.85; }
+    .buzz-badge-active {
+      font-size: 1.15rem;
       font-weight: bold;
-      padding: 4px 16px;
-      border-radius: 20px;
+      border: 3px solid;
+      border-radius: 24px;
+      padding: 6px 24px;
       letter-spacing: 1px;
     }
-    .buzz-badge.p1 { background: var(--p1-color); color: #fff; }
-    .buzz-badge.p2 { background: var(--p2-color); color: #fff; }
+    .buzz-action-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+    .buzz-correct-btn { font-size: 1.1rem; padding: 10px 28px; color: #fff; }
+    .buzz-wrong-btn { font-size: 1.1rem; padding: 10px 28px; }
+    .buzz-util-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; opacity: 0.75; }
+
+    /* Player count picker */
+    .player-count-modal { max-width: 360px; gap: 24px; }
+    .player-count-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .player-count-btn { font-size: 1.6rem; padding: 14px 20px; min-width: 60px; }
 
     /* ── Help overlay ─────────────────────────────────────────────────────── */
     .help-overlay {

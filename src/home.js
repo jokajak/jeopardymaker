@@ -80,11 +80,13 @@ function buildBoardItem(board, container, { onPlay, onEdit }) {
   const newGameBtn = document.createElement('button');
   newGameBtn.textContent = 'New Game';
   newGameBtn.className = 'btn small';
-  newGameBtn.title = 'Reset scores and revealed cells, then play';
+  newGameBtn.title = 'Choose player count, reset scores and revealed cells';
   newGameBtn.addEventListener('click', async () => {
     const b = await loadBoard(board.id);
-    const state = makeGameState(board.id);
-    onPlay(b, state);
+    pickPlayerCount(n => {
+      const state = makeGameState(board.id, n);
+      onPlay(b, state);
+    });
   });
 
   const editBtn = document.createElement('button');
@@ -123,6 +125,36 @@ function triggerExport(board) {
   a.download = `${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function pickPlayerCount(onPick) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+
+  const box = document.createElement('div');
+  box.className = 'modal-content player-count-modal';
+
+  const heading = document.createElement('div');
+  heading.className = 'modal-value';
+  heading.textContent = 'How many players?';
+  box.appendChild(heading);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'player-count-btns';
+  [2, 3, 4, 5, 6].forEach(n => {
+    const btn = document.createElement('button');
+    btn.className = 'btn primary player-count-btn';
+    btn.textContent = n;
+    btn.addEventListener('click', () => { overlay.remove(); onPick(n); });
+    btnRow.appendChild(btn);
+  });
+
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  const esc = e => { if (e.code === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); } };
+  document.addEventListener('keydown', esc);
 }
 
 function triggerImport(container, callbacks) {
