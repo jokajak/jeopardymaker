@@ -9,11 +9,22 @@ let _boardEl = null;
 let _p1El = null;
 let _p2El = null;
 
+let _globalKeyHandler = null;
+
 export function mountPlay(container, board, state, onExit) {
   _board = board;
   _state = state;
   _onExit = onExit;
   _buzzer = createBuzzer();
+
+  // Clean up any previous handler before mounting
+  if (_globalKeyHandler) document.removeEventListener('keydown', _globalKeyHandler);
+  _globalKeyHandler = e => {
+    // Only fire when no modal is open
+    if (document.querySelector('.modal-overlay, .help-overlay')) return;
+    if (e.key === '?') _showHelp();
+  };
+  document.addEventListener('keydown', _globalKeyHandler);
 
   container.innerHTML = '';
   container.appendChild(_buildRoot());
@@ -43,7 +54,10 @@ function _buildScorebbar() {
   const exitBtn = document.createElement('button');
   exitBtn.className = 'ctrl-btn';
   exitBtn.textContent = '← Home';
-  exitBtn.addEventListener('click', _onExit);
+  exitBtn.addEventListener('click', () => {
+    if (_globalKeyHandler) { document.removeEventListener('keydown', _globalKeyHandler); _globalKeyHandler = null; }
+    _onExit();
+  });
 
   const resetBtn = document.createElement('button');
   resetBtn.className = 'ctrl-btn';
