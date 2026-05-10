@@ -1,14 +1,18 @@
-import { getRound, saveGameState } from './store.js';
+import { getRound, saveGameState, makeGameState } from './store.js';
 import { createBuzzer, Phase } from './buzzer.js';
+
+// One color per player slot (supports up to 6)
+const PLAYER_COLORS = ['#e74c3c', '#2ecc71', '#3498db', '#f39c12', '#9b59b6', '#1abc9c'];
+
+function playerColor(i) { return PLAYER_COLORS[i % PLAYER_COLORS.length]; }
+function playerLabel(i) { return `P${i + 1}`; }
 
 let _board = null;
 let _state = null;
 let _onExit = null;
 let _buzzer = null;
 let _boardEl = null;
-let _p1El = null;
-let _p2El = null;
-
+let _scoreEls = [];
 let _globalKeyHandler = null;
 
 export function mountPlay(container, board, state, onExit) {
@@ -17,10 +21,8 @@ export function mountPlay(container, board, state, onExit) {
   _onExit = onExit;
   _buzzer = createBuzzer();
 
-  // Clean up any previous handler before mounting
   if (_globalKeyHandler) document.removeEventListener('keydown', _globalKeyHandler);
   _globalKeyHandler = e => {
-    // Only fire when no modal is open
     if (document.querySelector('.modal-overlay, .help-overlay')) return;
     if (e.key === '?') _showHelp();
   };
@@ -35,18 +37,15 @@ export function mountPlay(container, board, state, onExit) {
 function _buildRoot() {
   const root = document.createElement('div');
   root.className = 'play-root';
-  root.appendChild(_buildScorebbar());
+  root.appendChild(_buildScorebar());
   _boardEl = _buildBoard();
   root.appendChild(_boardEl);
   return root;
 }
 
-function _buildScorebbar() {
+function _buildScorebar() {
   const bar = document.createElement('div');
   bar.className = 'scorebar';
-
-  _p1El = document.createElement('div');
-  _p1El.className = 'score p1-score';
 
   const controls = document.createElement('div');
   controls.className = 'scorebar-controls';
@@ -72,17 +71,27 @@ function _buildScorebbar() {
 
   controls.append(exitBtn, resetBtn, helpBtn);
 
-  _p2El = document.createElement('div');
-  _p2El.className = 'score p2-score';
+  const scores = document.createElement('div');
+  scores.className = 'scorebar-scores';
 
-  bar.append(_p1El, controls, _p2El);
+  _scoreEls = [];
+  for (let i = 0; i < _state.playerCount; i++) {
+    const el = document.createElement('div');
+    el.className = 'player-score';
+    el.style.color = playerColor(i);
+    _scoreEls.push(el);
+    scores.appendChild(el);
+  }
   _refreshScores();
+
+  bar.append(controls, scores);
   return bar;
 }
 
 function _refreshScores() {
-  _p1El.innerHTML = `P1: <span>${_state.p1Score}</span>`;
-  _p2El.innerHTML = `P2: <span>${_state.p2Score}</span>`;
+  _scoreEls.forEach((el, i) => {
+    el.textContent = `${playerLabel(i)}: ${_state.scores[i]}`;
+  });
 }
 
 function _buildBoard() {
@@ -134,26 +143,32 @@ function _markRevealed(row, col) {
   if (el) {
     el.classList.add('revealed');
     el.textContent = '';
-    const fresh = el.cloneNode(false);
-    el.replaceWith(fresh);
+    el.replaceWith(el.cloneNode(false));
   }
 }
 
 function _resetGame() {
   if (!confirm('Reset game? This clears all revealed cells and scores.')) return;
   _state.revealedCells = [];
-  _state.p1Score = 0;
-  _state.p2Score = 0;
+  _state.scores = _state.scores.map(() => 0);
   saveGameState(_state);
   _refreshScores();
   _refreshBoard();
 }
 
-// ── Cell modal ───────────────────────────────────────────────────────────────
-// State machine per cell open:
-//   PROMPT/IDLE → buzz A/L → PROMPT/BUZZED → Y (award) or N (deduct+reopen)
-//   PROMPT/* → Space → show ANSWER → Space/Esc → close+reveal
-//   PROMPT/* → Esc → close, do NOT mark revealed
+function _adjustScore(playerIndex, delta) {
+  _state.scores[playerIndex] += delta;
+  saveGameState(_state);
+  _refreshScores();
+}
+
+// ── Cell flow ────────────────────────────────────────────────────────────────
+// Prompt shown → host taps a player button → buzz locked in
+//   → Correct: award + show answer modal
+//   → Wrong: deduct + reset buzzer + stay on prompt
+// Prompt shown → Reveal Answer → answer modal
+// Prompt shown → Close → back to board (not revealed)
+// Answer modal → Close → mark cell revealed
 
 function _openCell(row, col, value, cellData) {
   _buzzer.reset();
@@ -161,102 +176,180 @@ function _openCell(row, col, value, cellData) {
 }
 
 function _showPromptModal(row, col, value, cellData) {
-  const overlay = _createOverlay();
-  const content = _createModalContent();
-  _renderModalPart(content, value, cellData.prompt, 'Space → reveal answer  ·  A/L buzz  ·  Esc → close');
-  overlay.appendChild(content);
+  const { overlay, content } = _createModalShell();
+
+  _renderCellPart(content, value, cellData.prompt);
+  content.appendChild(_buildBuzzControls(row, col, value, cellData, overlay, content));
+
   document.body.appendChild(overlay);
+  _syncBuzzUI(overlay, content, row, col, value, cellData);
 
-  // Keep overlay border in sync with buzzer state
-  const unsub = _buzzer.subscribe(phase => _syncBuzzBorder(overlay, phase));
-  _syncBuzzBorder(overlay, _buzzer.phase);
-
-  // Buzz badge slot (inserted above hint when someone buzzes)
-  let buzzBadgeEl = null;
-
+  // Keyboard shortcuts (secondary to on-screen buttons)
   const keyHandler = e => {
     const phase = _buzzer.phase;
-
-    if (e.key === 'a' || e.key === 'A') { _buzzer.buzz(1); return; }
-    if (e.key === 'l' || e.key === 'L') { _buzzer.buzz(2); return; }
-
+    const digit = parseInt(e.key, 10);
+    if (digit >= 1 && digit <= _state.playerCount && phase === Phase.IDLE) {
+      _buzzer.buzz(digit);
+      return;
+    }
     if ((e.key === 'y' || e.key === 'Y') && phase !== Phase.IDLE) {
       e.preventDefault();
-      const player = _buzzer.buzzedPlayer();
-      _adjustScore(player, value);
-      cleanup(true);
-      _showAnswerModal(row, col, value, cellData, true);
-      return;
+      const i = _buzzer.buzzedPlayer() - 1;
+      _adjustScore(i, value);
+      cleanup();
+      _showAnswerModal(row, col, value, cellData);
     }
-
     if ((e.key === 'n' || e.key === 'N') && phase !== Phase.IDLE) {
       e.preventDefault();
-      const player = _buzzer.buzzedPlayer();
-      _adjustScore(player, -value);
+      _adjustScore(_buzzer.buzzedPlayer() - 1, -value);
       _buzzer.reset();
-      return;
     }
-
-    if (e.code === 'Space') {
-      e.preventDefault();
-      cleanup(false);
-      _showAnswerModal(row, col, value, cellData, false);
-    }
-
-    if (e.code === 'Escape') {
-      cleanup(false);
-      // Esc from prompt: do not mark revealed
-    }
+    if (e.code === 'Space') { e.preventDefault(); cleanup(); _showAnswerModal(row, col, value, cellData); }
+    if (e.code === 'Escape') { cleanup(); }
   };
-
-  // Update buzz badge when phase changes
-  _buzzer.subscribe(phase => {
-    const existing = content.querySelector('.buzz-badge');
-    if (existing) existing.remove();
-    if (phase !== Phase.IDLE) {
-      const badge = document.createElement('div');
-      badge.className = `buzz-badge ${phase === Phase.P1 ? 'p1' : 'p2'}`;
-      badge.textContent = phase === Phase.P1 ? 'P1 BUZZED IN' : 'P2 BUZZED IN';
-      // Insert after modal-value
-      const valEl = content.querySelector('.modal-value');
-      valEl ? valEl.after(badge) : content.prepend(badge);
-      // Update hint
-      const hint = content.querySelector('.modal-hint');
-      if (hint) hint.textContent = 'Y → correct (+pts)  ·  N → wrong (−pts)';
-    } else {
-      const hint = content.querySelector('.modal-hint');
-      if (hint) hint.textContent = 'Space → reveal answer  ·  A/L buzz  ·  Esc → close';
-    }
-  });
-
   document.addEventListener('keydown', keyHandler);
-  overlay.addEventListener('click', e => { if (e.target === overlay) { cleanup(false); } });
 
-  function cleanup(willShowAnswer) {
+  const unsub = _buzzer.subscribe(() => _syncBuzzUI(overlay, content, row, col, value, cellData));
+
+  function cleanup() {
     document.removeEventListener('keydown', keyHandler);
     unsub();
-    if (!willShowAnswer) _buzzer.reset();
+    _buzzer.reset();
     overlay.remove();
+  }
+
+  overlay._cleanup = cleanup;
+}
+
+function _buildBuzzControls(row, col, value, cellData, overlay, content) {
+  const wrap = document.createElement('div');
+  wrap.className = 'buzz-controls';
+  wrap.dataset.buzzControls = '1';
+  return wrap; // filled by _syncBuzzUI
+}
+
+function _syncBuzzUI(overlay, content, row, col, value, cellData) {
+  const phase = _buzzer.phase;
+  const wrap = content.querySelector('[data-buzz-controls]');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  overlay.classList.toggle('buzz-p1', false);
+  overlay.classList.toggle('buzz-p2', false);
+  overlay.style.removeProperty('--buzz-color');
+
+  if (phase === Phase.IDLE) {
+    // Buzz-in row
+    const buzzRow = document.createElement('div');
+    buzzRow.className = 'buzz-btn-row';
+    for (let i = 0; i < _state.playerCount; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'btn buzz-player-btn';
+      btn.textContent = playerLabel(i);
+      btn.style.borderColor = playerColor(i);
+      btn.style.color = playerColor(i);
+      btn.addEventListener('click', () => _buzzer.buzz(i + 1));
+      buzzRow.appendChild(btn);
+    }
+    wrap.appendChild(buzzRow);
+
+    // Utility row
+    const utilRow = document.createElement('div');
+    utilRow.className = 'buzz-util-row';
+
+    const revealBtn = document.createElement('button');
+    revealBtn.className = 'btn';
+    revealBtn.textContent = 'Reveal Answer';
+    revealBtn.addEventListener('click', () => {
+      overlay._cleanup?.();
+      _showAnswerModal(row, col, value, cellData);
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn';
+    closeBtn.textContent = 'Close';
+    closeBtn.addEventListener('click', () => overlay._cleanup?.());
+
+    utilRow.append(revealBtn, closeBtn);
+    wrap.appendChild(utilRow);
+
+  } else {
+    // Someone is buzzed in
+    const playerIndex = _buzzer.buzzedPlayer() - 1;
+    const color = playerColor(playerIndex);
+
+    overlay.style.setProperty('--buzz-color', color);
+    overlay.classList.add('buzz-active');
+
+    const badge = document.createElement('div');
+    badge.className = 'buzz-badge-active';
+    badge.textContent = `${playerLabel(playerIndex)} buzzed in`;
+    badge.style.color = color;
+    badge.style.borderColor = color;
+    wrap.appendChild(badge);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'buzz-action-row';
+
+    const correctBtn = document.createElement('button');
+    correctBtn.className = 'btn primary buzz-correct-btn';
+    correctBtn.textContent = '✓ Correct';
+    correctBtn.style.background = color;
+    correctBtn.style.borderColor = color;
+    correctBtn.addEventListener('click', () => {
+      _adjustScore(playerIndex, value);
+      overlay._cleanup?.();
+      _showAnswerModal(row, col, value, cellData);
+    });
+
+    const wrongBtn = document.createElement('button');
+    wrongBtn.className = 'btn danger buzz-wrong-btn';
+    wrongBtn.textContent = '✗ Wrong';
+    wrongBtn.addEventListener('click', () => {
+      _adjustScore(playerIndex, -value);
+      _buzzer.reset();
+    });
+
+    actionRow.append(correctBtn, wrongBtn);
+    wrap.appendChild(actionRow);
+
+    // Keep Reveal + Close available even when buzzed
+    const utilRow = document.createElement('div');
+    utilRow.className = 'buzz-util-row';
+
+    const revealBtn = document.createElement('button');
+    revealBtn.className = 'btn';
+    revealBtn.textContent = 'Reveal Answer';
+    revealBtn.addEventListener('click', () => {
+      overlay._cleanup?.();
+      _showAnswerModal(row, col, value, cellData);
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn';
+    closeBtn.textContent = 'Close';
+    closeBtn.addEventListener('click', () => overlay._cleanup?.());
+
+    utilRow.append(revealBtn, closeBtn);
+    wrap.appendChild(utilRow);
   }
 }
 
-function _showAnswerModal(row, col, value, cellData, alreadyScored) {
-  const overlay = _createOverlay();
-  const content = _createModalContent();
-  const hintText = alreadyScored
-    ? 'Space / Esc → close'
-    : 'Space / Esc → close';
-  _renderModalPart(content, value, cellData.answer, hintText);
-  overlay.appendChild(content);
+function _showAnswerModal(row, col, value, cellData) {
+  const { overlay, content } = _createModalShell();
+  _renderCellPart(content, value, cellData.answer);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn primary';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', cleanup);
+  content.appendChild(closeBtn);
+
   document.body.appendChild(overlay);
 
   const keyHandler = e => {
-    if (e.code === 'Space' || e.code === 'Escape') {
-      e.preventDefault();
-      cleanup();
-    }
+    if (e.code === 'Space' || e.code === 'Escape') { e.preventDefault(); cleanup(); }
   };
-
   document.addEventListener('keydown', keyHandler);
   overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(); });
 
@@ -269,19 +362,16 @@ function _showAnswerModal(row, col, value, cellData, alreadyScored) {
 
 // ── Modal helpers ────────────────────────────────────────────────────────────
 
-function _createOverlay() {
-  const el = document.createElement('div');
-  el.className = 'modal-overlay';
-  return el;
+function _createModalShell() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const content = document.createElement('div');
+  content.className = 'modal-content';
+  overlay.appendChild(content);
+  return { overlay, content };
 }
 
-function _createModalContent() {
-  const el = document.createElement('div');
-  el.className = 'modal-content';
-  return el;
-}
-
-function _renderModalPart(content, value, part, hintText) {
+function _renderCellPart(content, value, part) {
   const valEl = document.createElement('div');
   valEl.className = 'modal-value';
   valEl.textContent = `$${value}`;
@@ -299,23 +389,6 @@ function _renderModalPart(content, value, part, hintText) {
     p.textContent = part.text;
     content.appendChild(p);
   }
-
-  const hint = document.createElement('div');
-  hint.className = 'modal-hint';
-  hint.textContent = hintText;
-  content.appendChild(hint);
-}
-
-function _syncBuzzBorder(overlay, phase) {
-  overlay.classList.toggle('buzz-p1', phase === Phase.P1);
-  overlay.classList.toggle('buzz-p2', phase === Phase.P2);
-}
-
-function _adjustScore(player, delta) {
-  if (player === 1) _state.p1Score += delta;
-  else _state.p2Score += delta;
-  saveGameState(_state);
-  _refreshScores();
 }
 
 // ── Help overlay ─────────────────────────────────────────────────────────────
@@ -326,31 +399,43 @@ function _showHelp() {
 
   const box = document.createElement('div');
   box.className = 'help-content';
+
+  const n = _state.playerCount;
+  const keyRows = n <= 6
+    ? `<tr><td>1–${n}</td><td>Buzz in Player 1–${n} (keyboard shortcut)</td></tr>` : '';
+
   box.innerHTML = `
     <h2>Keyboard Shortcuts</h2>
     <table class="help-table">
-      <tr><td>A</td><td>Player 1 buzz in</td></tr>
-      <tr><td>L</td><td>Player 2 buzz in</td></tr>
+      ${keyRows}
       <tr><td>Y</td><td>Award buzzed player (+value)</td></tr>
-      <tr><td>N</td><td>Deduct buzzed player (−value), reopen buzzers</td></tr>
+      <tr><td>N</td><td>Deduct buzzed player (−value), reopen</td></tr>
       <tr><td>Space</td><td>Reveal answer / close cell</td></tr>
       <tr><td>Esc</td><td>Close prompt without resolving</td></tr>
       <tr><td>?</td><td>Show / hide this overlay</td></tr>
     </table>
+    <p style="color:#aaa;font-size:0.8rem;font-weight:normal;margin-top:12px;text-align:center">
+      Tap player buttons on screen to buzz in
+    </p>
   `;
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'btn primary help-close';
   closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', () => overlay.remove());
+  closeBtn.addEventListener('click', close);
   box.appendChild(closeBtn);
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 
   const handler = e => {
-    if (e.code === 'Escape' || e.key === '?') { overlay.remove(); document.removeEventListener('keydown', handler); }
+    if (e.code === 'Escape' || e.key === '?') { close(); }
   };
   document.addEventListener('keydown', handler);
-  overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); document.removeEventListener('keydown', handler); } });
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', handler);
+  }
 }
