@@ -82,11 +82,15 @@ function buildBoardItem(board, container, { onPlay, onEdit }) {
   newGameBtn.className = 'btn small';
   newGameBtn.title = 'Choose player count, reset scores and revealed cells';
   newGameBtn.addEventListener('click', async () => {
-    const b = await loadBoard(board.id);
-    pickPlayerCount(n => {
-      const state = makeGameState(board.id, n);
-      onPlay(b, state);
-    });
+    try {
+      const b = await loadBoard(board.id);
+      pickPlayerCount(n => {
+        const state = makeGameState(board.id, n);
+        onPlay(b, state);
+      });
+    } catch (e) {
+      alert(`Could not start game: ${e.message}`);
+    }
   });
 
   const editBtn = document.createElement('button');
