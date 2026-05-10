@@ -1,0 +1,137 @@
+import { listBoards, makeBoard, saveBoard, deleteBoard, loadBoard, loadGameState, importBoard } from './store.js';
+
+// ── Home screen ──────────────────────────────────────────────────────────────
+
+export async function mountHome(container, onPlay) {
+  container.innerHTML = '';
+  const boards = await listBoards();
+
+  const root = document.createElement('div');
+  root.className = 'home-root';
+
+  const header = document.createElement('div');
+  header.className = 'home-header';
+  header.innerHTML = `<h1>Jeopardy Maker</h1>`;
+  root.appendChild(header);
+
+  const actions = document.createElement('div');
+  actions.className = 'home-actions';
+
+  const newBtn = document.createElement('button');
+  newBtn.textContent = 'New Board';
+  newBtn.className = 'btn primary';
+  newBtn.addEventListener('click', async () => {
+    const name = prompt('Board name:', 'New Board');
+    if (!name) return;
+    const board = makeBoard(name, 3);
+    await saveBoard(board);
+    await mountHome(container, onPlay);
+  });
+
+  const importBtn = document.createElement('button');
+  importBtn.textContent = 'Import JSON';
+  importBtn.className = 'btn';
+  importBtn.addEventListener('click', () => triggerImport(container, onPlay));
+
+  actions.appendChild(newBtn);
+  actions.appendChild(importBtn);
+  root.appendChild(actions);
+
+  if (boards.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No boards yet. Create one or import a JSON file.';
+    root.appendChild(empty);
+  } else {
+    const list = document.createElement('ul');
+    list.className = 'board-list';
+    boards.forEach(board => {
+      const item = buildBoardItem(board, container, onPlay);
+      list.appendChild(item);
+    });
+    root.appendChild(list);
+  }
+
+  container.appendChild(root);
+}
+
+function buildBoardItem(board, container, onPlay) {
+  const item = document.createElement('li');
+  item.className = 'board-item';
+
+  const info = document.createElement('div');
+  info.className = 'board-info';
+  const title = document.createElement('span');
+  title.className = 'board-title';
+  title.textContent = board.name;
+  const meta = document.createElement('span');
+  meta.className = 'board-meta';
+  const catCount = board.rounds[0].categories.length;
+  meta.textContent = `${catCount} categories · ${new Date(board.createdAt).toLocaleDateString()}`;
+  info.appendChild(title);
+  info.appendChild(meta);
+
+  const btns = document.createElement('div');
+  btns.className = 'board-btns';
+
+  const playBtn = document.createElement('button');
+  playBtn.textContent = 'Play';
+  playBtn.className = 'btn primary small';
+  playBtn.addEventListener('click', async () => {
+    const b = await loadBoard(board.id);
+    const state = await loadGameState(board.id);
+    onPlay(b, state);
+  });
+
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export';
+  exportBtn.className = 'btn small';
+  exportBtn.addEventListener('click', () => triggerExport(board));
+
+  const delBtn = document.createElement('button');
+  delBtn.textContent = 'Delete';
+  delBtn.className = 'btn danger small';
+  delBtn.addEventListener('click', async () => {
+    if (!confirm(`Delete "${board.name}"?`)) return;
+    await deleteBoard(board.id);
+    await mountHome(container, onPlay);
+  });
+
+  btns.appendChild(playBtn);
+  btns.appendChild(exportBtn);
+  btns.appendChild(delBtn);
+
+  item.appendChild(info);
+  item.appendChild(btns);
+  return item;
+}
+
+function triggerExport(board) {
+  const json = JSON.stringify(board, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${board.name.replace(/\s+/g, '_')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function triggerImport(container, onPlay) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const board = importBoard(text);
+      await saveBoard(board);
+      await mountHome(container, onPlay);
+    } catch (e) {
+      alert(`Import failed: ${e.message}`);
+    }
+  });
+  input.click();
+}
