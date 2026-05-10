@@ -90,8 +90,31 @@ export function exportBoard(board) {
 export function importBoard(jsonString) {
   const board = JSON.parse(jsonString);
   if (board.schema !== 1) throw new Error(`Unknown schema version: ${board.schema}`);
-  if (!board.id) board.id = crypto.randomUUID();
   if (!board.rounds?.length) throw new Error('Board has no rounds');
+  if (!board.id) board.id = crypto.randomUUID();
+  if (!board.createdAt) board.createdAt = new Date().toISOString();
+
+  // Normalize each round so play/editor never see undefined fields
+  for (const round of board.rounds) {
+    if (!Array.isArray(round.values) || round.values.length !== 5)
+      round.values = [100, 200, 300, 400, 500];
+    for (const cat of round.categories ?? []) {
+      if (!cat.title) cat.title = '';
+      if (!Array.isArray(cat.cells)) cat.cells = [];
+      // Ensure exactly 5 cells
+      while (cat.cells.length < 5) cat.cells.push(makeCell());
+      cat.cells = cat.cells.slice(0, 5);
+      for (const cell of cat.cells) {
+        cell.prompt  ??= {};
+        cell.answer  ??= {};
+        cell.prompt.text         ??= '';
+        cell.prompt.imageDataUrl ??= null;
+        cell.answer.text         ??= '';
+        cell.answer.imageDataUrl ??= null;
+      }
+    }
+  }
+
   return board;
 }
 
