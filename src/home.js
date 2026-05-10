@@ -1,8 +1,6 @@
-import { listBoards, makeBoard, saveBoard, deleteBoard, loadBoard, loadGameState, importBoard } from './store.js';
+import { listBoards, makeBoard, saveBoard, deleteBoard, loadBoard, loadGameState, makeGameState, importBoard, exportBoard } from './store.js';
 
-// ── Home screen ──────────────────────────────────────────────────────────────
-
-export async function mountHome(container, onPlay) {
+export async function mountHome(container, { onPlay, onEdit }) {
   container.innerHTML = '';
   const boards = await listBoards();
 
@@ -11,7 +9,7 @@ export async function mountHome(container, onPlay) {
 
   const header = document.createElement('div');
   header.className = 'home-header';
-  header.innerHTML = `<h1>Jeopardy Maker</h1>`;
+  header.innerHTML = '<h1>Jeopardy Maker</h1>';
   root.appendChild(header);
 
   const actions = document.createElement('div');
@@ -25,13 +23,13 @@ export async function mountHome(container, onPlay) {
     if (!name) return;
     const board = makeBoard(name, 3);
     await saveBoard(board);
-    await mountHome(container, onPlay);
+    await mountHome(container, { onPlay, onEdit });
   });
 
   const importBtn = document.createElement('button');
   importBtn.textContent = 'Import JSON';
   importBtn.className = 'btn';
-  importBtn.addEventListener('click', () => triggerImport(container, onPlay));
+  importBtn.addEventListener('click', () => triggerImport(container, { onPlay, onEdit }));
 
   actions.appendChild(newBtn);
   actions.appendChild(importBtn);
@@ -45,17 +43,14 @@ export async function mountHome(container, onPlay) {
   } else {
     const list = document.createElement('ul');
     list.className = 'board-list';
-    boards.forEach(board => {
-      const item = buildBoardItem(board, container, onPlay);
-      list.appendChild(item);
-    });
+    boards.forEach(board => list.appendChild(buildBoardItem(board, container, { onPlay, onEdit })));
     root.appendChild(list);
   }
 
   container.appendChild(root);
 }
 
-function buildBoardItem(board, container, onPlay) {
+function buildBoardItem(board, container, { onPlay, onEdit }) {
   const item = document.createElement('li');
   item.className = 'board-item';
 
@@ -68,8 +63,7 @@ function buildBoardItem(board, container, onPlay) {
   meta.className = 'board-meta';
   const catCount = board.rounds[0].categories.length;
   meta.textContent = `${catCount} categories · ${new Date(board.createdAt).toLocaleDateString()}`;
-  info.appendChild(title);
-  info.appendChild(meta);
+  info.append(title, meta);
 
   const btns = document.createElement('div');
   btns.className = 'board-btns';
@@ -83,6 +77,24 @@ function buildBoardItem(board, container, onPlay) {
     onPlay(b, state);
   });
 
+  const newGameBtn = document.createElement('button');
+  newGameBtn.textContent = 'New Game';
+  newGameBtn.className = 'btn small';
+  newGameBtn.title = 'Reset scores and revealed cells, then play';
+  newGameBtn.addEventListener('click', async () => {
+    const b = await loadBoard(board.id);
+    const state = makeGameState(board.id);
+    onPlay(b, state);
+  });
+
+  const editBtn = document.createElement('button');
+  editBtn.textContent = 'Edit';
+  editBtn.className = 'btn small';
+  editBtn.addEventListener('click', async () => {
+    const b = await loadBoard(board.id);
+    onEdit(b);
+  });
+
   const exportBtn = document.createElement('button');
   exportBtn.textContent = 'Export';
   exportBtn.className = 'btn small';
@@ -94,30 +106,26 @@ function buildBoardItem(board, container, onPlay) {
   delBtn.addEventListener('click', async () => {
     if (!confirm(`Delete "${board.name}"?`)) return;
     await deleteBoard(board.id);
-    await mountHome(container, onPlay);
+    await mountHome(container, { onPlay, onEdit });
   });
 
-  btns.appendChild(playBtn);
-  btns.appendChild(exportBtn);
-  btns.appendChild(delBtn);
-
-  item.appendChild(info);
-  item.appendChild(btns);
+  btns.append(playBtn, newGameBtn, editBtn, exportBtn, delBtn);
+  item.append(info, btns);
   return item;
 }
 
 function triggerExport(board) {
-  const json = JSON.stringify(board, null, 2);
+  const json = exportBoard(board);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${board.name.replace(/\s+/g, '_')}.json`;
+  a.download = `${board.name.replace(/[^a-z0-9]/gi, '_')}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-function triggerImport(container, onPlay) {
+function triggerImport(container, callbacks) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.json,application/json';
@@ -128,7 +136,7 @@ function triggerImport(container, onPlay) {
       const text = await file.text();
       const board = importBoard(text);
       await saveBoard(board);
-      await mountHome(container, onPlay);
+      await mountHome(container, callbacks);
     } catch (e) {
       alert(`Import failed: ${e.message}`);
     }
