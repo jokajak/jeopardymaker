@@ -1,5 +1,11 @@
 # Jeopardy Maker
 
+> **This project has moved.** Development now happens at
+> [jokajak/playground](https://github.com/jokajak/playground/tree/main/jeopardymaker),
+> and the live app is now at
+> **https://jokajak.github.io/playground/jeopardymaker/**. This repository is
+> kept for history only.
+
 A Jeopardy clone for 2–6 players on a shared screen. Author custom boards with
 text and images using the built-in editor, save them to your browser via
 IndexedDB, and export/import as self-contained JSON files. No server, no build
@@ -7,7 +13,7 @@ step, no accounts.
 
 ## Play now
 
-**https://jokajak.github.io/jeopardymaker/**
+**https://jokajak.github.io/playground/jeopardymaker/**
 
 ## How to run locally
 
